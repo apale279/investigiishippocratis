@@ -24,3 +24,13 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Leaflet: popup sempre su sfondo chiaro — forza testo scuro (evita testo chiaro ereditato in dark mode) */
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: #ffffff;
+}
+.leaflet-container .leaflet-popup-content {
+  margin: 12px 14px;
+  min-width: 0;
+}

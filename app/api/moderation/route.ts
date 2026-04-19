@@ -25,12 +25,15 @@ type Body = {
   lng?: number;
   category?: string;
   submitted_by?: string | null;
+  limited_hours?: boolean;
+  hours_note?: string | null;
+  extra_info?: string | null;
   /** Solo per create: bozza o pubblicazione immediata */
   initialStatus?: "draft" | "approved";
 };
 
 const PLACE_SELECT =
-  "id, name, address, description, lat, lng, category, status, submitted_by, created_at";
+  "id, name, address, description, lat, lng, category, status, submitted_by, limited_hours, hours_note, extra_info, created_at";
 
 function getExpectedPassword() {
   return process.env.MODERATOR_PASSWORD ?? MODERATOR_PASSWORD_FALLBACK;
@@ -74,8 +77,31 @@ function validatePlaceFields(body: Body) {
       ? body.submitted_by.trim() || null
       : body.submitted_by ?? null;
 
+  const limited_hours = Boolean(body.limited_hours);
+  const hours_note = limited_hours
+    ? typeof body.hours_note === "string"
+      ? body.hours_note.trim() || null
+      : body.hours_note ?? null
+    : null;
+
+  const extra_info =
+    typeof body.extra_info === "string"
+      ? body.extra_info.trim() || null
+      : body.extra_info ?? null;
+
   return {
-    fields: { name, address, description, lat, lng, category, submitted_by },
+    fields: {
+      name,
+      address,
+      description,
+      lat,
+      lng,
+      category,
+      submitted_by,
+      limited_hours,
+      hours_note,
+      extra_info,
+    },
   };
 }
 

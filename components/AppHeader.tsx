@@ -23,6 +23,9 @@ export function AppHeader() {
           <Link href="/" className="hover:text-teal-700 dark:hover:text-teal-400">
             Mappa
           </Link>
+          <Link href="/luoghi" className="hover:text-teal-700 dark:hover:text-teal-400">
+            Elenco luoghi
+          </Link>
           <Link href="/invia" className="hover:text-teal-700 dark:hover:text-teal-400">
             Proponi un luogo
           </Link>

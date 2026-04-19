@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { Place } from "@/lib/types";
 import { PlaceEditorCard } from "@/components/moderation/PlaceEditorCard";
 import { ModerationNewPlace } from "@/components/moderation/ModerationNewPlace";
+import { PublishedPlacesList } from "@/components/moderation/PublishedPlacesList";
 
 type Lists = {
   pending: Place[];
@@ -84,7 +85,13 @@ export default function ModerazionePage() {
 
   return (
     <div className="min-h-screen bg-stone-100 px-4 py-10 dark:bg-stone-950">
-      <div className="mx-auto max-w-2xl">
+      <div
+        className={
+          tab === "published"
+            ? "mx-auto w-full max-w-4xl"
+            : "mx-auto max-w-2xl"
+        }
+      >
         <p className="text-sm text-stone-500 dark:text-stone-400">
           <Link href="/" className="text-teal-800 underline dark:text-teal-400">
             ← Torna alla mappa
@@ -208,22 +215,14 @@ export default function ModerazionePage() {
             )}
 
             {tab === "published" && (
-              <ul className="space-y-6">
-                {!loading && lists.published.length === 0 && (
-                  <p className="text-stone-600 dark:text-stone-400">Nessun POI pubblicato.</p>
-                )}
-                {lists.published.map((p) => (
-                  <PlaceEditorCard
-                    key={p.id}
-                    place={p}
-                    variant="published"
-                    password={password}
-                    onRefresh={async () => loadList(password)}
-                    busyId={busyId}
-                    setBusyId={setBusyId}
-                  />
-                ))}
-              </ul>
+              <PublishedPlacesList
+                places={lists.published}
+                password={password}
+                onRefresh={async () => loadList(password)}
+                busyId={busyId}
+                setBusyId={setBusyId}
+                loading={loading}
+              />
             )}
           </div>
         )}

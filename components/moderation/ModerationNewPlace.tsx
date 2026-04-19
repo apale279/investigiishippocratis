@@ -20,6 +20,9 @@ export function ModerationNewPlace({
   const [lat, setLat] = useState("");
   const [lng, setLng] = useState("");
   const [description, setDescription] = useState("");
+  const [limitedHours, setLimitedHours] = useState(false);
+  const [hoursNote, setHoursNote] = useState("");
+  const [extraInfo, setExtraInfo] = useState("");
   const [category, setCategory] = useState<string>(PLACE_CATEGORIES[0]);
   const [submittedBy, setSubmittedBy] = useState("");
   const [addressHint, setAddressHint] = useState<string | null>(null);
@@ -76,6 +79,9 @@ export function ModerationNewPlace({
           lng: coords.lng,
           category,
           submitted_by: submittedBy.trim() || null,
+          limited_hours: limitedHours,
+          hours_note: limitedHours ? hoursNote.trim() || null : null,
+          extra_info: extraInfo.trim() || null,
           initialStatus,
         }),
       });
@@ -89,6 +95,9 @@ export function ModerationNewPlace({
       setLat("");
       setLng("");
       setDescription("");
+      setLimitedHours(false);
+      setHoursNote("");
+      setExtraInfo("");
       setSubmittedBy("");
       setMessage(
         initialStatus === "draft"
@@ -152,6 +161,53 @@ export function ModerationNewPlace({
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             disabled={busy}
+          />
+        </div>
+
+        <div className="flex items-start gap-3 rounded-md border border-stone-200 bg-stone-50/80 px-3 py-3 dark:border-stone-700 dark:bg-stone-900/50">
+          <input
+            id="mod-new-lh"
+            type="checkbox"
+            className="mt-1 h-4 w-4 rounded border-stone-400 text-teal-800 dark:border-stone-500"
+            checked={limitedHours}
+            onChange={(e) => {
+              setLimitedHours(e.target.checked);
+              if (!e.target.checked) setHoursNote("");
+            }}
+            disabled={busy}
+          />
+          <div className="min-w-0 flex-1">
+            <label htmlFor="mod-new-lh" className="text-sm font-medium text-stone-800 dark:text-stone-200">
+              Orario limitato
+            </label>
+            {limitedHours && (
+              <textarea
+                rows={3}
+                className="mt-2 w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 dark:border-stone-600 dark:bg-stone-950 dark:text-stone-100"
+                value={hoursNote}
+                onChange={(e) => setHoursNote(e.target.value)}
+                disabled={busy}
+                placeholder="Orari (testo libero)"
+              />
+            )}
+          </div>
+        </div>
+
+        <div>
+          <label htmlFor="mod-new-extra" className="block text-sm font-medium text-stone-700 dark:text-stone-300">
+            Altre informazioni sul luogo
+          </label>
+          <p className="mt-0.5 text-xs text-stone-500 dark:text-stone-400">
+            Ad esempio costo biglietto, come raggiungerlo una volta in loco…
+          </p>
+          <textarea
+            id="mod-new-extra"
+            rows={3}
+            className="mt-1 w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-stone-900 dark:border-stone-600 dark:bg-stone-950 dark:text-stone-100"
+            value={extraInfo}
+            onChange={(e) => setExtraInfo(e.target.value)}
+            disabled={busy}
+            placeholder="Ad esempio costo biglietto, come raggiungerlo una volta in loco…"
           />
         </div>
 

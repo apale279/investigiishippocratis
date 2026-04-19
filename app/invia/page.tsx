@@ -13,6 +13,9 @@ export default function InviaPage() {
   const [lat, setLat] = useState("");
   const [lng, setLng] = useState("");
   const [description, setDescription] = useState("");
+  const [limitedHours, setLimitedHours] = useState(false);
+  const [hoursNote, setHoursNote] = useState("");
+  const [extraInfo, setExtraInfo] = useState("");
   const [category, setCategory] = useState<string>(PLACE_CATEGORIES[0]);
   const [submittedBy, setSubmittedBy] = useState("");
   const [status, setStatus] = useState<"idle" | "sending" | "ok">("idle");
@@ -69,6 +72,9 @@ export default function InviaPage() {
         category,
         status: "pending",
         submitted_by: submittedBy.trim() || null,
+        limited_hours: limitedHours,
+        hours_note: limitedHours ? hoursNote.trim() || null : null,
+        extra_info: extraInfo.trim() || null,
       });
       if (error) throw error;
       setStatus("ok");
@@ -78,6 +84,9 @@ export default function InviaPage() {
       setLat("");
       setLng("");
       setDescription("");
+      setLimitedHours(false);
+      setHoursNote("");
+      setExtraInfo("");
       setSubmittedBy("");
     } catch (err) {
       console.error(err);
@@ -156,6 +165,62 @@ export default function InviaPage() {
               className="mt-1 w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-stone-900 shadow-sm dark:border-stone-600 dark:bg-stone-900 dark:text-stone-100"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
+
+          <div className="flex items-start gap-3 rounded-md border border-stone-200 bg-stone-50/80 px-3 py-3 dark:border-stone-700 dark:bg-stone-900/50">
+            <input
+              id="limitedHours"
+              type="checkbox"
+              className="mt-1 h-4 w-4 rounded border-stone-400 text-teal-800 focus:ring-teal-700 dark:border-stone-500"
+              checked={limitedHours}
+              onChange={(e) => {
+                setLimitedHours(e.target.checked);
+                if (!e.target.checked) setHoursNote("");
+              }}
+            />
+            <div className="min-w-0 flex-1">
+              <label htmlFor="limitedHours" className="text-sm font-medium text-stone-800 dark:text-stone-200">
+                Orario limitato
+              </label>
+              <p className="mt-0.5 text-xs text-stone-500 dark:text-stone-400">
+                Spunta se l&apos;accesso è consentito solo in certe fasce orarie o giorni.
+              </p>
+              {limitedHours && (
+                <div className="mt-3">
+                  <label htmlFor="hoursNote" className="block text-xs font-medium text-stone-600 dark:text-stone-400">
+                    Orari (testo libero)
+                  </label>
+                  <textarea
+                    id="hoursNote"
+                    rows={3}
+                    className="mt-1 w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 shadow-sm dark:border-stone-600 dark:bg-stone-900 dark:text-stone-100"
+                    value={hoursNote}
+                    onChange={(e) => setHoursNote(e.target.value)}
+                    placeholder="Es. lun–ven 9–17, sabato chiuso…"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <label
+              htmlFor="extraInfo"
+              className="block text-sm font-medium text-stone-700 dark:text-stone-300"
+            >
+              Altre informazioni sul luogo
+            </label>
+            <p className="mt-0.5 text-xs text-stone-500 dark:text-stone-400">
+              Ad esempio costo biglietto, come raggiungerlo una volta in loco…
+            </p>
+            <textarea
+              id="extraInfo"
+              rows={3}
+              className="mt-1 w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-stone-900 shadow-sm dark:border-stone-600 dark:bg-stone-900 dark:text-stone-100"
+              value={extraInfo}
+              onChange={(e) => setExtraInfo(e.target.value)}
+              placeholder="Ad esempio costo biglietto, come raggiungerlo una volta in loco…"
             />
           </div>
 

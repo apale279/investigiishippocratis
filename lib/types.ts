@@ -11,5 +11,11 @@ export type Place = {
   category: string;
   status: PlaceStatus;
   submitted_by: string | null;
+  /** Accesso solo in certe fasce orarie */
+  limited_hours: boolean;
+  /** Dettaglio orari (se limited_hours) */
+  hours_note: string | null;
+  /** Info pratiche: biglietti, come arrivare, ecc. */
+  extra_info: string | null;
   created_at?: string;
 };

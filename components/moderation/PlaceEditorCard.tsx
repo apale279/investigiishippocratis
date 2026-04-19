@@ -32,6 +32,9 @@ type Draft = {
   name: string;
   address: string;
   description: string;
+  limited_hours: boolean;
+  hours_note: string;
+  extra_info: string;
   lat: string;
   lng: string;
   category: string;
@@ -43,6 +46,9 @@ function placeToDraft(p: Place): Draft {
     name: p.name,
     address: p.address ?? "",
     description: p.description ?? "",
+    limited_hours: p.limited_hours ?? false,
+    hours_note: p.hours_note ?? "",
+    extra_info: p.extra_info ?? "",
     lat: String(p.lat),
     lng: String(p.lng),
     category: p.category,
@@ -59,6 +65,8 @@ export function PlaceEditorCard({
   onRefresh,
   busyId,
   setBusyId,
+  /** Se false, il contenitore è un `div` (es. dentro un elenco personalizzato). Default: `li`. */
+  asListItem = true,
 }: {
   place: Place;
   variant: EditorVariant;
@@ -66,6 +74,7 @@ export function PlaceEditorCard({
   onRefresh: () => Promise<void>;
   busyId: string | null;
   setBusyId: (id: string | null) => void;
+  asListItem?: boolean;
 }) {
   const [draft, setDraft] = useState<Draft>(() => placeToDraft(place));
 
@@ -112,6 +121,9 @@ export function PlaceEditorCard({
         lng: coords.lng,
         category: draft.category,
         submitted_by: draft.submitted_by.trim() || null,
+        limited_hours: draft.limited_hours,
+        hours_note: draft.limited_hours ? draft.hours_note.trim() || null : null,
+        extra_info: draft.extra_info.trim() || null,
       }),
     });
     const data = await res.json();
@@ -252,8 +264,10 @@ export function PlaceEditorCard({
         ? "Bozza"
         : "Pubblicato";
 
+  const Shell = asListItem ? "li" : "div";
+
   return (
-    <li className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900">
+    <Shell className="rounded-lg border border-stone-200 bg-white p-4 shadow-sm dark:border-stone-700 dark:bg-stone-900">
       <p className="text-xs text-stone-500 dark:text-stone-400">
         <span className="font-medium text-stone-600 dark:text-stone-300">{variantTitle}</span>
         {" · "}
@@ -299,6 +313,57 @@ export function PlaceEditorCard({
             disabled={busy}
           />
         </div>
+
+        <div className="flex items-start gap-2 rounded-md border border-stone-200 bg-stone-50/80 px-3 py-2 dark:border-stone-700 dark:bg-stone-900/40">
+          <input
+            id={`lh-${place.id}`}
+            type="checkbox"
+            className="mt-0.5 h-4 w-4 rounded border-stone-400 text-teal-800 dark:border-stone-500"
+            checked={draft.limited_hours}
+            onChange={(e) => {
+              const v = e.target.checked;
+              setDraft((d) => ({
+                ...d,
+                limited_hours: v,
+                hours_note: v ? d.hours_note : "",
+              }));
+            }}
+            disabled={busy}
+          />
+          <div className="min-w-0 flex-1">
+            <label htmlFor={`lh-${place.id}`} className="text-xs font-medium text-stone-700 dark:text-stone-300">
+              Orario limitato
+            </label>
+            {draft.limited_hours && (
+              <textarea
+                rows={3}
+                placeholder="Orari (testo libero)"
+                className="mt-2 w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 dark:border-stone-600 dark:bg-stone-950 dark:text-stone-100"
+                value={draft.hours_note}
+                onChange={(e) => setField("hours_note", e.target.value)}
+                disabled={busy}
+              />
+            )}
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-stone-600 dark:text-stone-400">
+            Altre informazioni sul luogo
+          </label>
+          <p className="mt-0.5 text-[11px] text-stone-500 dark:text-stone-400">
+            Ad esempio costo biglietto, come raggiungerlo una volta in loco…
+          </p>
+          <textarea
+            rows={3}
+            className="mt-1 w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 dark:border-stone-600 dark:bg-stone-950 dark:text-stone-100"
+            value={draft.extra_info}
+            onChange={(e) => setField("extra_info", e.target.value)}
+            disabled={busy}
+            placeholder="Ad esempio costo biglietto, come raggiungerlo una volta in loco…"
+          />
+        </div>
+
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-medium text-stone-600 dark:text-stone-400">
@@ -439,6 +504,6 @@ export function PlaceEditorCard({
           </>
         )}
       </div>
-    </li>
+    </Shell>
   );
 }

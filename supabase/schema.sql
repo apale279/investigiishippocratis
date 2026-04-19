@@ -12,6 +12,9 @@ create table if not exists public.places (
   category text not null,
   status text not null default 'pending',
   submitted_by text,
+  limited_hours boolean not null default false,
+  hours_note text,
+  extra_info text,
   created_at timestamptz not null default now(),
   constraint places_status_check check (status in ('pending', 'approved', 'draft'))
 );

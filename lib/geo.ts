@@ -11,5 +11,8 @@ export function haversineKm(lat1: number, lon1: number, lat2: number, lon2: numb
   return R * c;
 }
 
-/** Raggio entro cui considerare i POI “vicini” al punto cercato (km). */
-export const SEARCH_RADIUS_KM = 100;
+/** Valore predefinito del raggio di ricerca sulla mappa (km). */
+export const DEFAULT_SEARCH_RADIUS_KM = 100;
+
+/** @deprecated Usa DEFAULT_SEARCH_RADIUS_KM */
+export const SEARCH_RADIUS_KM = DEFAULT_SEARCH_RADIUS_KM;

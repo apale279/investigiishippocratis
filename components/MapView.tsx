@@ -1,12 +1,35 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Circle, MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import L from "leaflet";
 import type { Place } from "@/lib/types";
+import { MapUrlFocus } from "@/components/MapUrlFocus";
+import { PlaceMapPopup } from "@/components/PlaceMapPopup";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
-import { haversineKm, SEARCH_RADIUS_KM } from "@/lib/geo";
+import { DEFAULT_SEARCH_RADIUS_KM, haversineKm } from "@/lib/geo";
 import "leaflet/dist/leaflet.css";
+
+const RADIUS_MIN_KM = 1;
+const RADIUS_MAX_KM = 500;
+
+function clampRadiusKm(n: number): number {
+  if (Number.isNaN(n)) return DEFAULT_SEARCH_RADIUS_KM;
+  return Math.min(RADIUS_MAX_KM, Math.max(RADIUS_MIN_KM, Math.round(n)));
+}
+
+function MapFlyTo({
+  target,
+}: {
+  target: { lat: number; lng: number; seq: number } | null;
+}) {
+  const map = useMap();
+  useEffect(() => {
+    if (!target) return;
+    map.flyTo([target.lat, target.lng], 15, { duration: 0.55 });
+  }, [target, map]);
+  return null;
+}
 
 function MapFitController({
   allPlaces,
@@ -60,6 +83,10 @@ export default function MapView() {
   } | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [radiusKm, setRadiusKm] = useState(DEFAULT_SEARCH_RADIUS_KM);
+  const [radiusInput, setRadiusInput] = useState(String(DEFAULT_SEARCH_RADIUS_KM));
+  const [flyTarget, setFlyTarget] = useState<{ lat: number; lng: number; seq: number } | null>(null);
+  const flySeq = useRef(0);
 
   useEffect(() => {
     const icon = L.Icon.Default.prototype as unknown as { _getIconUrl?: string };
@@ -78,7 +105,9 @@ export default function MapView() {
         const supabase = createBrowserSupabaseClient();
         const { data, error: qErr } = await supabase
           .from("places")
-          .select("id, name, address, description, lat, lng, category, status, submitted_by")
+          .select(
+            "id, name, address, description, lat, lng, category, status, submitted_by, limited_hours, hours_note, extra_info"
+          )
           .eq("status", "approved");
 
         if (qErr) throw qErr;
@@ -99,13 +128,19 @@ export default function MapView() {
     };
   }, []);
 
-  const displayPlaces = useMemo(() => {
-    if (!searchCenter) return allPlaces;
-    return allPlaces.filter(
-      (p) =>
-        haversineKm(searchCenter.lat, searchCenter.lng, p.lat, p.lng) <= SEARCH_RADIUS_KM
-    );
-  }, [allPlaces, searchCenter]);
+  const nearbySorted = useMemo(() => {
+    if (!searchCenter) return [];
+    const r = clampRadiusKm(radiusKm);
+    return allPlaces
+      .map((p) => ({
+        place: p,
+        distKm: haversineKm(searchCenter.lat, searchCenter.lng, p.lat, p.lng),
+      }))
+      .filter((x) => x.distKm <= r)
+      .sort((a, b) => a.distKm - b.distKm);
+  }, [allPlaces, searchCenter, radiusKm]);
+
+  const displayPlaces = searchCenter ? nearbySorted.map((x) => x.place) : allPlaces;
 
   const center: [number, number] = [42.5, 12.5];
   const zoom = allPlaces.length === 0 ? 5 : 6;
@@ -146,12 +181,20 @@ export default function MapView() {
   function clearSearch() {
     setSearchCenter(null);
     setSearchError(null);
+    setFlyTarget(null);
   }
+
+  function onPickPlaceFromList(p: Place) {
+    flySeq.current += 1;
+    setFlyTarget({ lat: p.lat, lng: p.lng, seq: flySeq.current });
+  }
+
+  const effectiveRadius = searchCenter ? clampRadiusKm(radiusKm) : radiusKm;
 
   return (
     <div className="relative min-h-0 flex-1 bg-stone-200 dark:bg-stone-800">
-      <div className="pointer-events-none absolute left-0 right-0 top-0 z-[1000] flex flex-col gap-2 p-3 sm:left-3 sm:right-auto sm:max-w-md">
-        <div className="pointer-events-auto flex flex-col gap-2 rounded-lg border border-stone-200 bg-white/95 p-3 shadow-md backdrop-blur dark:border-stone-600 dark:bg-stone-900/95">
+      <div className="pointer-events-none absolute left-0 right-0 top-0 z-[1000] flex flex-col gap-2 p-3 sm:left-3 sm:right-auto sm:max-w-xl">
+        <div className="pointer-events-auto flex max-h-[min(85vh,32rem)] flex-col gap-3 rounded-lg border border-stone-200 bg-white/95 p-3 shadow-md backdrop-blur dark:border-stone-600 dark:bg-stone-900/95">
           <label htmlFor="map-search" className="text-xs font-medium text-stone-600 dark:text-stone-400">
             Cerca un luogo (città o indirizzo)
           </label>
@@ -167,7 +210,7 @@ export default function MapView() {
                   void runSearch();
                 }
               }}
-              placeholder="es. Berlino, Parigi, Via Roma Milano…"
+              placeholder="es. Londra, Berlino, Via Roma Milano…"
             />
             <div className="flex gap-2">
               <button
@@ -189,13 +232,107 @@ export default function MapView() {
               )}
             </div>
           </div>
-          {searchCenter && (
-            <p className="text-xs text-stone-600 dark:text-stone-400">
-              Area: <span className="font-medium text-stone-800 dark:text-stone-200">{SEARCH_RADIUS_KM} km</span> da{" "}
-              <span className="line-clamp-2 text-stone-800 dark:text-stone-200">{searchCenter.label}</span>
-              {" · "}
-              <span className="font-medium">{displayPlaces.length}</span> luoghi in mappa
+
+          <div className="rounded-md border border-stone-100 bg-stone-50/90 px-3 py-2 dark:border-stone-700 dark:bg-stone-800/50">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label htmlFor="map-radius" className="text-xs font-medium text-stone-700 dark:text-stone-300">
+                Raggio ricerca (km)
+              </label>
+              <span className="text-xs tabular-nums text-stone-600 dark:text-stone-400">
+                {RADIUS_MIN_KM}–{RADIUS_MAX_KM} km
+              </span>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <input
+                id="map-radius"
+                type="range"
+                min={RADIUS_MIN_KM}
+                max={RADIUS_MAX_KM}
+                step={1}
+                value={clampRadiusKm(radiusKm)}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  setRadiusKm(v);
+                  setRadiusInput(String(v));
+                }}
+                className="min-w-[120px] flex-1 accent-teal-800 dark:accent-teal-600"
+              />
+              <div className="flex items-center gap-1">
+                <input
+                  type="number"
+                  min={RADIUS_MIN_KM}
+                  max={RADIUS_MAX_KM}
+                  value={radiusInput}
+                  onChange={(e) => setRadiusInput(e.target.value)}
+                  onBlur={() => {
+                    const v = clampRadiusKm(parseFloat(radiusInput.replace(",", ".")));
+                    setRadiusKm(v);
+                    setRadiusInput(String(v));
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      (e.target as HTMLInputElement).blur();
+                    }
+                  }}
+                  className="w-16 rounded border border-stone-300 bg-white px-2 py-1 text-center text-sm text-stone-900 dark:border-stone-600 dark:bg-stone-950 dark:text-stone-100"
+                />
+                <span className="text-xs text-stone-600 dark:text-stone-400">km</span>
+              </div>
+            </div>
+            <p className="mt-1.5 text-[11px] text-stone-500 dark:text-stone-400">
+              Si applica al punto trovato dopo &quot;Cerca&quot;: mappa, cerchio ed elenco sotto.
             </p>
+          </div>
+
+          {searchCenter && (
+            <>
+              <p className="text-xs text-stone-600 dark:text-stone-400">
+                Punto:{" "}
+                <span className="font-medium text-stone-800 dark:text-stone-200">
+                  {effectiveRadius} km
+                </span>{" "}
+                da{" "}
+                <span className="line-clamp-2 text-stone-800 dark:text-stone-200">{searchCenter.label}</span>
+                {" · "}
+                <span className="font-medium">{nearbySorted.length}</span> POI nell&apos;area
+              </p>
+
+              <div className="min-h-0 flex flex-col gap-1">
+                <p className="text-xs font-medium text-stone-700 dark:text-stone-300">
+                  POI vicini (per distanza)
+                </p>
+                <ul
+                  className="max-h-52 overflow-y-auto rounded-md border border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-950/80"
+                  role="list"
+                >
+                  {nearbySorted.length === 0 ? (
+                    <li className="px-3 py-4 text-center text-xs text-stone-500 dark:text-stone-400">
+                      Nessun POI in questo raggio. Aumenta i km o cerca un altro centro.
+                    </li>
+                  ) : (
+                    nearbySorted.map(({ place: p, distKm }) => (
+                      <li key={p.id} className="border-b border-stone-100 last:border-b-0 dark:border-stone-800">
+                        <button
+                          type="button"
+                          onClick={() => onPickPlaceFromList(p)}
+                          className="flex w-full items-start gap-2 px-3 py-2.5 text-left text-sm transition-colors hover:bg-teal-50 dark:hover:bg-stone-800"
+                        >
+                          <span className="shrink-0 tabular-nums text-xs text-teal-800 dark:text-teal-400">
+                            {distKm < 10 ? distKm.toFixed(1) : Math.round(distKm)} km
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="font-medium text-stone-900 dark:text-stone-100">{p.name}</span>
+                            <span className="mt-0.5 block text-xs text-stone-500 dark:text-stone-400">
+                              {p.category}
+                            </span>
+                          </span>
+                        </button>
+                      </li>
+                    ))
+                  )}
+                </ul>
+              </div>
+            </>
           )}
           {searchError && (
             <p className="text-xs text-red-700 dark:text-red-400">{searchError}</p>
@@ -228,11 +365,13 @@ export default function MapView() {
           displayPlaces={displayPlaces}
           searchCenter={searchCenter ? { lat: searchCenter.lat, lng: searchCenter.lng } : null}
         />
+        <MapFlyTo target={flyTarget} />
+        <MapUrlFocus places={allPlaces} />
         {searchCenter && (
           <>
             <Circle
               center={[searchCenter.lat, searchCenter.lng]}
-              radius={SEARCH_RADIUS_KM * 1000}
+              radius={effectiveRadius * 1000}
               pathOptions={{
                 color: "#0d9488",
                 weight: 1,
@@ -242,11 +381,18 @@ export default function MapView() {
             />
             <Marker position={[searchCenter.lat, searchCenter.lng]} icon={searchPinIcon}>
               <Popup>
-                <div className="max-w-xs text-sm">
-                  <p className="font-semibold">Ricerca</p>
-                  <p className="text-stone-600">{searchCenter.label}</p>
-                  <p className="mt-1 text-xs text-stone-500">
-                    Cerchio ≈ {SEARCH_RADIUS_KM} km — solo i POI dentro l&apos;area sono mostrati.
+                <div
+                  className="max-w-xs text-sm text-stone-900"
+                  style={{ color: "#1c1917" }}
+                >
+                  <p className="m-0 font-semibold" style={{ color: "#0c0a09" }}>
+                    Ricerca
+                  </p>
+                  <p className="mt-1 text-stone-800" style={{ color: "#292524" }}>
+                    {searchCenter.label}
+                  </p>
+                  <p className="mt-2 text-xs text-stone-600" style={{ color: "#57534e" }}>
+                    Cerchio ≈ {effectiveRadius} km — elenco a sinistra ordinato per distanza.
                   </p>
                 </div>
               </Popup>
@@ -255,15 +401,8 @@ export default function MapView() {
         )}
         {displayPlaces.map((p) => (
           <Marker key={p.id} position={[p.lat, p.lng]}>
-            <Popup>
-              <div className="max-w-xs text-sm">
-                <p className="font-semibold">{p.name}</p>
-                {p.address ? (
-                  <p className="text-xs text-stone-500 dark:text-stone-400">{p.address}</p>
-                ) : null}
-                <p className="text-stone-600">{p.category}</p>
-                {p.description ? <p className="mt-1">{p.description}</p> : null}
-              </div>
+            <Popup minWidth={260}>
+              <PlaceMapPopup place={p} />
             </Popup>
           </Marker>
         ))}
