@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import type { Place } from "@/lib/types";
 import { PlaceEditorCard } from "@/components/moderation/PlaceEditorCard";
 import { ModerationNewPlace } from "@/components/moderation/ModerationNewPlace";
 import { PublishedPlacesList } from "@/components/moderation/PublishedPlacesList";
+import { useI18n } from "@/lib/i18n/context";
 
 type Lists = {
   pending: Place[];
@@ -16,6 +17,7 @@ type Lists = {
 type TabId = "pending" | "drafts" | "published" | "new";
 
 export default function ModerazionePage() {
+  const { t } = useI18n();
   const [password, setPassword] = useState("");
   const [unlocked, setUnlocked] = useState(false);
   const [lists, setLists] = useState<Lists>({ pending: [], drafts: [], published: [] });
@@ -35,7 +37,7 @@ export default function ModerazionePage() {
         body: JSON.stringify({ password: pwd, action: "list" }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Errore");
+      if (!res.ok) throw new Error(data.error ?? t("moderation.genericError"));
       setLists({
         pending: data.pending ?? [],
         drafts: data.drafts ?? [],
@@ -43,11 +45,11 @@ export default function ModerazionePage() {
       });
     } catch (e) {
       console.error(e);
-      setError("Impossibile caricare i dati. Verifica password e configurazione server.");
+      setError(t("moderation.loadError"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   function onLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -61,7 +63,7 @@ export default function ModerazionePage() {
           body: JSON.stringify({ password, action: "list" }),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error ?? "Password errata");
+        if (!res.ok) throw new Error(data.error ?? t("moderation.wrongPassword"));
         setUnlocked(true);
         setLists({
           pending: data.pending ?? [],
@@ -69,19 +71,22 @@ export default function ModerazionePage() {
           published: data.published ?? [],
         });
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Accesso negato");
+        setError(err instanceof Error ? err.message : t("moderation.denied"));
       } finally {
         setLoading(false);
       }
     })();
   }
 
-  const tabs: { id: TabId; label: string; count: number }[] = [
-    { id: "pending", label: "In attesa", count: lists.pending.length },
-    { id: "drafts", label: "Bozze", count: lists.drafts.length },
-    { id: "published", label: "Pubblicati", count: lists.published.length },
-    { id: "new", label: "Nuovo POI", count: 0 },
-  ];
+  const tabs: { id: TabId; label: string; count: number }[] = useMemo(
+    () => [
+      { id: "pending", label: t("moderation.tabPending"), count: lists.pending.length },
+      { id: "drafts", label: t("moderation.tabDrafts"), count: lists.drafts.length },
+      { id: "published", label: t("moderation.tabPublished"), count: lists.published.length },
+      { id: "new", label: t("moderation.tabNew"), count: 0 },
+    ],
+    [t, lists.pending.length, lists.drafts.length, lists.published.length]
+  );
 
   return (
     <div className="min-h-screen bg-stone-100 px-4 py-10 dark:bg-stone-950">
@@ -94,22 +99,19 @@ export default function ModerazionePage() {
       >
         <p className="text-sm text-stone-500 dark:text-stone-400">
           <Link href="/" className="text-teal-800 underline dark:text-teal-400">
-            ← Torna alla mappa
+            {t("moderation.backToMap")}
           </Link>
         </p>
         <h1 className="mt-4 font-serif text-2xl font-semibold text-stone-800 dark:text-stone-100">
-          Moderazione
+          {t("moderation.title")}
         </h1>
-        <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">
-          Gestisci le proposte degli utenti, le bozze, i POI pubblicati e crea nuovi contenuti senza
-          passare dall’approvazione esterna.
-        </p>
+        <p className="mt-2 text-sm text-stone-600 dark:text-stone-400">{t("moderation.intro")}</p>
 
         {!unlocked ? (
           <form onSubmit={onLogin} className="mt-8 max-w-sm space-y-4">
             <div>
               <label htmlFor="pwd" className="block text-sm font-medium text-stone-700 dark:text-stone-300">
-                Password
+                {t("moderation.password")}
               </label>
               <input
                 id="pwd"
@@ -126,7 +128,7 @@ export default function ModerazionePage() {
               disabled={loading}
               className="rounded-md bg-stone-800 px-4 py-2 text-sm font-medium text-white hover:bg-stone-900 disabled:opacity-60 dark:bg-stone-600 dark:hover:bg-stone-500"
             >
-              {loading ? "Verifica…" : "Accedi"}
+              {loading ? t("moderation.verify") : t("moderation.login")}
             </button>
           </form>
         ) : (
@@ -138,7 +140,7 @@ export default function ModerazionePage() {
                 disabled={loading || creating || busyId !== null}
                 className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm dark:border-stone-600 dark:bg-stone-900"
               >
-                Aggiorna tutto
+                {t("moderation.refreshAll")}
               </button>
             </div>
 
@@ -163,7 +165,9 @@ export default function ModerazionePage() {
             </div>
 
             {error && <p className="text-sm text-red-700 dark:text-red-400">{error}</p>}
-            {loading && <p className="text-sm text-stone-600">Caricamento…</p>}
+            {loading && (
+              <p className="text-sm text-stone-600">{t("moderation.loadingShort")}</p>
+            )}
 
             {tab === "new" && (
               <ModerationNewPlace
@@ -179,7 +183,7 @@ export default function ModerazionePage() {
             {tab === "pending" && (
               <ul className="space-y-6">
                 {!loading && lists.pending.length === 0 && (
-                  <p className="text-stone-600 dark:text-stone-400">Nessuna proposta in attesa.</p>
+                  <p className="text-stone-600 dark:text-stone-400">{t("moderation.emptyPending")}</p>
                 )}
                 {lists.pending.map((p) => (
                   <PlaceEditorCard
@@ -198,7 +202,7 @@ export default function ModerazionePage() {
             {tab === "drafts" && (
               <ul className="space-y-6">
                 {!loading && lists.drafts.length === 0 && (
-                  <p className="text-stone-600 dark:text-stone-400">Nessuna bozza.</p>
+                  <p className="text-stone-600 dark:text-stone-400">{t("moderation.emptyDrafts")}</p>
                 )}
                 {lists.drafts.map((p) => (
                   <PlaceEditorCard

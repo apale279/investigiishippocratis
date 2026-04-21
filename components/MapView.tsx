@@ -1,13 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Circle, MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import L from "leaflet";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { Place } from "@/lib/types";
 import { MapUrlFocus } from "@/components/MapUrlFocus";
 import { PlaceMapPopup } from "@/components/PlaceMapPopup";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { DEFAULT_SEARCH_RADIUS_KM, haversineKm } from "@/lib/geo";
+import { categoryDisplayName } from "@/lib/i18n/dictionaries";
+import { useI18n } from "@/lib/i18n/context";
+import { normalizeTagParam, placeHasTag } from "@/lib/hashtags";
+import { getMarkerIconForCategory, getSearchCenterIcon } from "@/lib/mapCategoryIcons";
 import "leaflet/dist/leaflet.css";
 
 const RADIUS_MIN_KM = 1;
@@ -32,20 +37,20 @@ function MapFlyTo({
 }
 
 function MapFitController({
-  allPlaces,
+  placesForInitialFit,
   displayPlaces,
   searchCenter,
 }: {
-  allPlaces: Place[];
+  placesForInitialFit: Place[];
   displayPlaces: Place[];
   searchCenter: { lat: number; lng: number } | null;
 }) {
   const map = useMap();
   useEffect(() => {
     if (!searchCenter) {
-      if (allPlaces.length > 0) {
+      if (placesForInitialFit.length > 0) {
         const bounds = L.latLngBounds(
-          allPlaces.map((p) => [p.lat, p.lng] as [number, number])
+          placesForInitialFit.map((p) => [p.lat, p.lng] as [number, number])
         );
         map.fitBounds(bounds, { padding: [48, 48], maxZoom: 14 });
       }
@@ -59,18 +64,17 @@ function MapFitController({
     } else {
       map.setView([searchCenter.lat, searchCenter.lng], 10);
     }
-  }, [map, allPlaces, displayPlaces, searchCenter]);
+  }, [map, placesForInitialFit, displayPlaces, searchCenter]);
   return null;
 }
 
-const searchPinIcon = L.divIcon({
-  className: "border-0 bg-transparent",
-  html: '<div style="font-size:26px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))">📍</div>',
-  iconSize: [26, 26],
-  iconAnchor: [13, 26],
-});
+function MapViewInner() {
+  const { t, locale } = useI18n();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const tagFilter = normalizeTagParam(searchParams.get("tag"));
+  const focusId = searchParams.get("focus");
 
-export default function MapView() {
   const [allPlaces, setAllPlaces] = useState<Place[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -106,7 +110,7 @@ export default function MapView() {
         const { data, error: qErr } = await supabase
           .from("places")
           .select(
-            "id, name, address, description, lat, lng, category, status, submitted_by, limited_hours, hours_note, extra_info"
+            "id, name, address, description, lat, lng, category, status, submitted_by, limited_hours, hours_note, extra_info, tags, photo_urls"
           )
           .eq("status", "approved");
 
@@ -114,11 +118,7 @@ export default function MapView() {
         if (!cancelled) setAllPlaces((data as Place[]) ?? []);
       } catch (e) {
         console.error(e);
-        if (!cancelled) {
-          setError(
-            "Impossibile caricare i luoghi. Controlla .env.local e che la tabella esista su Supabase."
-          );
-        }
+        if (!cancelled) setError("map.loadError");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -128,28 +128,49 @@ export default function MapView() {
     };
   }, []);
 
+  const tagFilteredPlaces = useMemo(() => {
+    if (!tagFilter) return allPlaces;
+    return allPlaces.filter((p) => placeHasTag(p, tagFilter));
+  }, [allPlaces, tagFilter]);
+
   const nearbySorted = useMemo(() => {
     if (!searchCenter) return [];
     const r = clampRadiusKm(radiusKm);
-    return allPlaces
+    return tagFilteredPlaces
       .map((p) => ({
         place: p,
         distKm: haversineKm(searchCenter.lat, searchCenter.lng, p.lat, p.lng),
       }))
       .filter((x) => x.distKm <= r)
       .sort((a, b) => a.distKm - b.distKm);
-  }, [allPlaces, searchCenter, radiusKm]);
+  }, [tagFilteredPlaces, searchCenter, radiusKm]);
 
-  const displayPlaces = searchCenter ? nearbySorted.map((x) => x.place) : allPlaces;
+  const displayPlaces = useMemo(() => {
+    let list = searchCenter ? nearbySorted.map((x) => x.place) : tagFilteredPlaces;
+    if (focusId) {
+      const fp = allPlaces.find((p) => p.id === focusId);
+      if (fp && !list.some((p) => p.id === fp.id)) {
+        list = [...list, fp];
+      }
+    }
+    return list;
+  }, [searchCenter, nearbySorted, tagFilteredPlaces, allPlaces, focusId]);
 
   const center: [number, number] = [42.5, 12.5];
   const zoom = allPlaces.length === 0 ? 5 : 6;
+
+  function clearTagFilter() {
+    const p = new URLSearchParams(searchParams.toString());
+    p.delete("tag");
+    const q = p.toString();
+    router.push(q ? `/?${q}` : "/");
+  }
 
   async function runSearch() {
     const q = searchQuery.trim();
     setSearchError(null);
     if (q.length < 2) {
-      setSearchError("Scrivi almeno 2 caratteri (es. Berlino).");
+      setSearchError("map.searchMinChars");
       return;
     }
     setSearching(true);
@@ -160,19 +181,19 @@ export default function MapView() {
         error?: string;
       };
       if (!res.ok) {
-        setSearchError(data.error ?? "Ricerca non riuscita.");
+        setSearchError(data.error ?? "map.searchFailed");
         return;
       }
       const first = data.results?.[0];
       if (!first) {
-        setSearchError("Nessun risultato. Prova un altro nome o una città più nota.");
+        setSearchError("map.searchNoResults");
         setSearchCenter(null);
         return;
       }
       setSearchCenter({ lat: first.lat, lng: first.lng, label: first.label });
     } catch (e) {
       console.error(e);
-      setSearchError("Errore di rete durante la ricerca.");
+      setSearchError("map.searchNetworkError");
     } finally {
       setSearching(false);
     }
@@ -191,12 +212,27 @@ export default function MapView() {
 
   const effectiveRadius = searchCenter ? clampRadiusKm(radiusKm) : radiusKm;
 
+  const showTagEmpty = !loading && tagFilter && displayPlaces.length === 0;
+
   return (
     <div className="relative min-h-0 flex-1 bg-stone-200 dark:bg-stone-800">
       <div className="pointer-events-none absolute left-0 right-0 top-0 z-[1000] flex flex-col gap-2 p-3 sm:left-3 sm:right-auto sm:max-w-xl">
         <div className="pointer-events-auto flex max-h-[min(85vh,32rem)] flex-col gap-3 rounded-lg border border-stone-200 bg-white/95 p-3 shadow-md backdrop-blur dark:border-stone-600 dark:bg-stone-900/95">
+          {tagFilter && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-teal-200 bg-teal-50/95 px-3 py-2 text-xs text-teal-950 dark:border-teal-800 dark:bg-teal-950/40 dark:text-teal-100">
+              <span className="font-medium">{t("tags.filterActive", { tag: tagFilter })}</span>
+              <button
+                type="button"
+                onClick={clearTagFilter}
+                className="shrink-0 rounded border border-teal-300 bg-white px-2 py-1 text-[11px] font-medium text-teal-900 hover:bg-teal-100 dark:border-teal-700 dark:bg-teal-900 dark:text-teal-100 dark:hover:bg-teal-800"
+              >
+                {t("tags.clear")}
+              </button>
+            </div>
+          )}
+
           <label htmlFor="map-search" className="text-xs font-medium text-stone-600 dark:text-stone-400">
-            Cerca un luogo (città o indirizzo)
+            {t("map.searchLabel")}
           </label>
           <div className="flex flex-col gap-2 sm:flex-row">
             <input
@@ -210,7 +246,7 @@ export default function MapView() {
                   void runSearch();
                 }
               }}
-              placeholder="es. Londra, Berlino, Via Roma Milano…"
+              placeholder={t("map.searchPlaceholder")}
             />
             <div className="flex gap-2">
               <button
@@ -219,7 +255,7 @@ export default function MapView() {
                 onClick={() => void runSearch()}
                 className="whitespace-nowrap rounded-md bg-teal-800 px-4 py-2 text-sm font-medium text-white hover:bg-teal-900 disabled:opacity-60 dark:bg-teal-700 dark:hover:bg-teal-600"
               >
-                {searching ? "…" : "Cerca"}
+                {searching ? "…" : t("map.search")}
               </button>
               {searchCenter && (
                 <button
@@ -227,7 +263,7 @@ export default function MapView() {
                   onClick={clearSearch}
                   className="whitespace-nowrap rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800 hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-100 dark:hover:bg-stone-700"
                 >
-                  Mostra tutti
+                  {t("map.showAll")}
                 </button>
               )}
             </div>
@@ -236,7 +272,7 @@ export default function MapView() {
           <div className="rounded-md border border-stone-100 bg-stone-50/90 px-3 py-2 dark:border-stone-700 dark:bg-stone-800/50">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <label htmlFor="map-radius" className="text-xs font-medium text-stone-700 dark:text-stone-300">
-                Raggio ricerca (km)
+                {t("map.radiusLabel")}
               </label>
               <span className="text-xs tabular-nums text-stone-600 dark:text-stone-400">
                 {RADIUS_MIN_KM}–{RADIUS_MAX_KM} km
@@ -276,38 +312,34 @@ export default function MapView() {
                   }}
                   className="w-16 rounded border border-stone-300 bg-white px-2 py-1 text-center text-sm text-stone-900 dark:border-stone-600 dark:bg-stone-950 dark:text-stone-100"
                 />
-                <span className="text-xs text-stone-600 dark:text-stone-400">km</span>
+                <span className="text-xs text-stone-600 dark:text-stone-400">{t("map.km")}</span>
               </div>
             </div>
-            <p className="mt-1.5 text-[11px] text-stone-500 dark:text-stone-400">
-              Si applica al punto trovato dopo &quot;Cerca&quot;: mappa, cerchio ed elenco sotto.
-            </p>
+            <p className="mt-1.5 text-[11px] text-stone-500 dark:text-stone-400">{t("map.radiusHint")}</p>
           </div>
 
           {searchCenter && (
             <>
               <p className="text-xs text-stone-600 dark:text-stone-400">
-                Punto:{" "}
+                {t("map.pointFrom")}{" "}
                 <span className="font-medium text-stone-800 dark:text-stone-200">
-                  {effectiveRadius} km
+                  {effectiveRadius} {t("map.km")}
                 </span>{" "}
-                da{" "}
+                {t("map.from")}{" "}
                 <span className="line-clamp-2 text-stone-800 dark:text-stone-200">{searchCenter.label}</span>
                 {" · "}
-                <span className="font-medium">{nearbySorted.length}</span> POI nell&apos;area
+                <span className="font-medium">{nearbySorted.length}</span> {t("map.poiInArea")}
               </p>
 
               <div className="min-h-0 flex flex-col gap-1">
-                <p className="text-xs font-medium text-stone-700 dark:text-stone-300">
-                  POI vicini (per distanza)
-                </p>
+                <p className="text-xs font-medium text-stone-700 dark:text-stone-300">{t("map.nearbyTitle")}</p>
                 <ul
                   className="max-h-52 overflow-y-auto rounded-md border border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-950/80"
                   role="list"
                 >
                   {nearbySorted.length === 0 ? (
                     <li className="px-3 py-4 text-center text-xs text-stone-500 dark:text-stone-400">
-                      Nessun POI in questo raggio. Aumenta i km o cerca un altro centro.
+                      {t("map.noPoiInRadius")}
                     </li>
                   ) : (
                     nearbySorted.map(({ place: p, distKm }) => (
@@ -318,12 +350,12 @@ export default function MapView() {
                           className="flex w-full items-start gap-2 px-3 py-2.5 text-left text-sm transition-colors hover:bg-teal-50 dark:hover:bg-stone-800"
                         >
                           <span className="shrink-0 tabular-nums text-xs text-teal-800 dark:text-teal-400">
-                            {distKm < 10 ? distKm.toFixed(1) : Math.round(distKm)} km
+                            {distKm < 10 ? distKm.toFixed(1) : Math.round(distKm)} {t("map.km")}
                           </span>
                           <span className="min-w-0 flex-1">
                             <span className="font-medium text-stone-900 dark:text-stone-100">{p.name}</span>
                             <span className="mt-0.5 block text-xs text-stone-500 dark:text-stone-400">
-                              {p.category}
+                              {categoryDisplayName(p.category, locale)}
                             </span>
                           </span>
                         </button>
@@ -335,19 +367,24 @@ export default function MapView() {
             </>
           )}
           {searchError && (
-            <p className="text-xs text-red-700 dark:text-red-400">{searchError}</p>
+            <p className="text-xs text-red-700 dark:text-red-400">
+              {searchError.startsWith("map.") ? t(searchError) : searchError}
+            </p>
+          )}
+          {showTagEmpty && (
+            <p className="text-xs text-amber-800 dark:text-amber-200">{t("tags.empty")}</p>
           )}
         </div>
       </div>
 
       {loading && (
         <div className="absolute inset-0 z-[500] flex items-center justify-center bg-stone-100/80 text-stone-600 dark:bg-stone-900/80 dark:text-stone-300">
-          Caricamento mappa…
+          {t("map.loading")}
         </div>
       )}
       {error && (
         <div className="absolute inset-0 z-[500] flex items-center justify-center p-4 text-center text-red-700 dark:text-red-400">
-          {error}
+          {error && t(error)}
         </div>
       )}
       <MapContainer
@@ -361,7 +398,7 @@ export default function MapView() {
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         <MapFitController
-          allPlaces={allPlaces}
+          placesForInitialFit={tagFilteredPlaces}
           displayPlaces={displayPlaces}
           searchCenter={searchCenter ? { lat: searchCenter.lat, lng: searchCenter.lng } : null}
         />
@@ -379,20 +416,20 @@ export default function MapView() {
                 fillOpacity: 0.08,
               }}
             />
-            <Marker position={[searchCenter.lat, searchCenter.lng]} icon={searchPinIcon}>
+            <Marker position={[searchCenter.lat, searchCenter.lng]} icon={getSearchCenterIcon()}>
               <Popup>
                 <div
                   className="max-w-xs text-sm text-stone-900"
                   style={{ color: "#1c1917" }}
                 >
                   <p className="m-0 font-semibold" style={{ color: "#0c0a09" }}>
-                    Ricerca
+                    {t("map.popupSearch")}
                   </p>
                   <p className="mt-1 text-stone-800" style={{ color: "#292524" }}>
                     {searchCenter.label}
                   </p>
                   <p className="mt-2 text-xs text-stone-600" style={{ color: "#57534e" }}>
-                    Cerchio ≈ {effectiveRadius} km — elenco a sinistra ordinato per distanza.
+                    {t("map.popupSearchHint", { radius: effectiveRadius })}
                   </p>
                 </div>
               </Popup>
@@ -400,7 +437,7 @@ export default function MapView() {
           </>
         )}
         {displayPlaces.map((p) => (
-          <Marker key={p.id} position={[p.lat, p.lng]}>
+          <Marker key={p.id} position={[p.lat, p.lng]} icon={getMarkerIconForCategory(p.category)}>
             <Popup minWidth={260}>
               <PlaceMapPopup place={p} />
             </Popup>
@@ -408,5 +445,17 @@ export default function MapView() {
         ))}
       </MapContainer>
     </div>
+  );
+}
+
+export default function MapView() {
+  return (
+    <Suspense
+      fallback={
+        <div className="relative min-h-0 flex-1 bg-stone-200 dark:bg-stone-800" aria-hidden />
+      }
+    >
+      <MapViewInner />
+    </Suspense>
   );
 }

@@ -1,7 +1,13 @@
+"use client";
+
 import Image from "next/image";
 import Link from "next/link";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { useI18n } from "@/lib/i18n/context";
 
 export function AppHeader() {
+  const { t } = useI18n();
+
   return (
     <header className="shrink-0 border-b border-stone-200 bg-stone-50/95 px-4 py-3 backdrop-blur dark:border-stone-700 dark:bg-stone-900/95">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
@@ -19,17 +25,20 @@ export function AppHeader() {
           />
           <span className="leading-tight">In vestigiis Hippocratis</span>
         </Link>
-        <nav className="flex flex-wrap items-center gap-4 text-sm font-medium text-stone-600 dark:text-stone-300">
-          <Link href="/" className="hover:text-teal-700 dark:hover:text-teal-400">
-            Mappa
-          </Link>
-          <Link href="/luoghi" className="hover:text-teal-700 dark:hover:text-teal-400">
-            Elenco luoghi
-          </Link>
-          <Link href="/invia" className="hover:text-teal-700 dark:hover:text-teal-400">
-            Proponi un luogo
-          </Link>
-        </nav>
+        <div className="flex flex-wrap items-center gap-3">
+          <nav className="flex flex-wrap items-center gap-4 text-sm font-medium text-stone-600 dark:text-stone-300">
+            <Link href="/" className="hover:text-teal-700 dark:hover:text-teal-400">
+              {t("nav.map")}
+            </Link>
+            <Link href="/luoghi" className="hover:text-teal-700 dark:hover:text-teal-400">
+              {t("nav.places")}
+            </Link>
+            <Link href="/invia" className="hover:text-teal-700 dark:hover:text-teal-400">
+              {t("nav.propose")}
+            </Link>
+          </nav>
+          <LanguageSwitcher />
+        </div>
       </div>
     </header>
   );

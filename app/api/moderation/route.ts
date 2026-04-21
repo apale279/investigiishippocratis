@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { MODERATOR_PASSWORD_FALLBACK } from "@/lib/config";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { PLACE_CATEGORIES } from "@/lib/categories";
+import { normalizePhotoUrlsFromUnknown } from "@/lib/photoUrls";
+import { normalizeTagsFromUnknown } from "@/lib/tags";
 import type { PlaceStatus } from "@/lib/types";
 
 type Action =
@@ -28,12 +30,14 @@ type Body = {
   limited_hours?: boolean;
   hours_note?: string | null;
   extra_info?: string | null;
+  tags?: unknown;
+  photo_urls?: unknown;
   /** Solo per create: bozza o pubblicazione immediata */
   initialStatus?: "draft" | "approved";
 };
 
 const PLACE_SELECT =
-  "id, name, address, description, lat, lng, category, status, submitted_by, limited_hours, hours_note, extra_info, created_at";
+  "id, name, address, description, lat, lng, category, status, submitted_by, limited_hours, hours_note, extra_info, tags, photo_urls, created_at";
 
 function getExpectedPassword() {
   return process.env.MODERATOR_PASSWORD ?? MODERATOR_PASSWORD_FALLBACK;
@@ -89,6 +93,9 @@ function validatePlaceFields(body: Body) {
       ? body.extra_info.trim() || null
       : body.extra_info ?? null;
 
+  const tags = normalizeTagsFromUnknown(body.tags);
+  const photo_urls = normalizePhotoUrlsFromUnknown(body.photo_urls);
+
   return {
     fields: {
       name,
@@ -101,6 +108,8 @@ function validatePlaceFields(body: Body) {
       limited_hours,
       hours_note,
       extra_info,
+      tags,
+      photo_urls,
     },
   };
 }

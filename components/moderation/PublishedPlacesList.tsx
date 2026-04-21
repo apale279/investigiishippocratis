@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Place } from "@/lib/types";
 import { PlaceEditorCard } from "@/components/moderation/PlaceEditorCard";
+import { categoryDisplayName } from "@/lib/i18n/dictionaries";
+import { useI18n } from "@/lib/i18n/context";
 
 function matchesQuery(p: Place, q: string): boolean {
   const needle = q.trim().toLowerCase();
@@ -40,6 +42,7 @@ export function PublishedPlacesList({
   setBusyId: (id: string | null) => void;
   loading: boolean;
 }) {
+  const { t, locale } = useI18n();
   const [query, setQuery] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -55,7 +58,7 @@ export function PublishedPlacesList({
     <div className="space-y-4">
       <div>
         <label htmlFor="pub-search" className="block text-sm font-medium text-stone-700 dark:text-stone-300">
-          Cerca tra i luoghi pubblicati
+          {t("moderation.publishedList.searchLabel")}
         </label>
         <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:items-center">
           <input
@@ -63,7 +66,7 @@ export function PublishedPlacesList({
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Nome, indirizzo, categoria, descrizione, ID…"
+            placeholder={t("moderation.publishedList.searchPlaceholder")}
             className="min-w-0 flex-1 rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 shadow-sm dark:border-stone-600 dark:bg-stone-900 dark:text-stone-100"
             autoComplete="off"
           />
@@ -73,25 +76,25 @@ export function PublishedPlacesList({
               onClick={() => setQuery("")}
               className="shrink-0 rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-700 hover:bg-stone-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
             >
-              Azzera
+              {t("moderation.publishedList.clear")}
             </button>
           )}
         </div>
         <p className="mt-2 text-xs text-stone-500 dark:text-stone-400">
           {loading
-            ? "Caricamento…"
-            : `Mostrati ${filtered.length} di ${places.length} luoghi`}
-          {query.trim() !== "" && places.length > 0 && ` · filtro attivo`}
+            ? t("moderation.loadingShort")
+            : t("moderation.publishedList.count", { n: filtered.length, total: places.length })}
+          {query.trim() !== "" && places.length > 0 && ` · ${t("moderation.publishedList.filterOn")}`}
         </p>
       </div>
 
       {!loading && places.length === 0 && (
-        <p className="text-stone-600 dark:text-stone-400">Nessun POI pubblicato.</p>
+        <p className="text-stone-600 dark:text-stone-400">{t("moderation.emptyPublished")}</p>
       )}
 
       {!loading && places.length > 0 && filtered.length === 0 && (
         <p className="text-stone-600 dark:text-stone-400">
-          Nessun risultato per &quot;{query.trim()}&quot;. Prova altre parole o azzera la ricerca.
+          {t("moderation.publishedList.noneInFilter", { q: query.trim() })}
         </p>
       )}
 
@@ -112,7 +115,7 @@ export function PublishedPlacesList({
                   <span className="min-w-0 flex-1">
                     <span className="block font-medium text-stone-900 dark:text-stone-100">{p.name}</span>
                     <span className="mt-0.5 block text-sm text-stone-500 dark:text-stone-400">
-                      {p.category}
+                      {categoryDisplayName(p.category, locale)}
                       {p.address ? ` · ${p.address}` : ""}
                     </span>
                     <span className="mt-1 block font-mono text-xs text-stone-400 dark:text-stone-500">
@@ -120,7 +123,7 @@ export function PublishedPlacesList({
                     </span>
                   </span>
                   <span className="shrink-0 text-xs text-teal-800 dark:text-teal-400">
-                    {open ? "Chiudi" : "Modifica"}
+                    {open ? t("moderation.publishedList.chiudi") : t("moderation.publishedList.modifica")}
                   </span>
                 </button>
                 {open && (

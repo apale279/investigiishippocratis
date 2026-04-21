@@ -17,5 +17,9 @@ export type Place = {
   hours_note: string | null;
   /** Info pratiche: biglietti, come arrivare, ecc. */
   extra_info: string | null;
+  /** Hashtag normalizzati (minuscolo, senza #) */
+  tags: string[];
+  /** Fino a 3 URL immagini (Cloudinary) */
+  photo_urls: string[];
   created_at?: string;
 };

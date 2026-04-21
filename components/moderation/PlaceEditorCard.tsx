@@ -3,18 +3,23 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Place } from "@/lib/types";
 import { PLACE_CATEGORIES } from "@/lib/categories";
+import { categoryDisplayName, type Locale } from "@/lib/i18n/dictionaries";
+import { useI18n } from "@/lib/i18n/context";
+import { PlacePhotoPicker } from "@/components/PlacePhotoPicker";
+import { uploadImagesToCloudinary } from "@/lib/cloudinaryUpload";
+import { parseTagsInput } from "@/lib/tags";
 
-function formatDateIt(iso?: string) {
+function formatDate(iso: string | undefined, locale: Locale) {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return new Intl.DateTimeFormat("it-IT", {
+  return new Intl.DateTimeFormat(locale === "en" ? "en-GB" : "it-IT", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(d);
 }
 
-function OsmLink({ lat, lng }: { lat: number; lng: number }) {
+function OsmLink({ lat, lng, label }: { lat: number; lng: number; label: string }) {
   const href = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=16/${lat}/${lng}`;
   return (
     <a
@@ -23,7 +28,7 @@ function OsmLink({ lat, lng }: { lat: number; lng: number }) {
       rel="noopener noreferrer"
       className="text-teal-800 underline dark:text-teal-400"
     >
-      Apri su OpenStreetMap
+      {label}
     </a>
   );
 }
@@ -35,6 +40,7 @@ type Draft = {
   limited_hours: boolean;
   hours_note: string;
   extra_info: string;
+  tags: string;
   lat: string;
   lng: string;
   category: string;
@@ -49,6 +55,7 @@ function placeToDraft(p: Place): Draft {
     limited_hours: p.limited_hours ?? false,
     hours_note: p.hours_note ?? "",
     extra_info: p.extra_info ?? "",
+    tags: (p.tags ?? []).join(", "),
     lat: String(p.lat),
     lng: String(p.lng),
     category: p.category,
@@ -76,16 +83,31 @@ export function PlaceEditorCard({
   setBusyId: (id: string | null) => void;
   asListItem?: boolean;
 }) {
+  const { t, locale } = useI18n();
   const [draft, setDraft] = useState<Draft>(() => placeToDraft(place));
+  const [photoUrls, setPhotoUrls] = useState<string[]>(() => place.photo_urls ?? []);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
 
   useEffect(() => {
     setDraft(placeToDraft(place));
+    setPhotoUrls(place.photo_urls ?? []);
+    setPendingFiles([]);
   }, [place]);
 
   const busy = busyId === place.id;
 
   function setField<K extends keyof Draft>(key: K, value: Draft[K]) {
     setDraft((d) => ({ ...d, [key]: value }));
+  }
+
+  function addPendingPhotos(fileList: FileList | null) {
+    if (!fileList?.length) return;
+    const room = 3 - photoUrls.length - pendingFiles.length;
+    if (room <= 0) return;
+    const next = Array.from(fileList)
+      .filter((f) => f.type.startsWith("image/"))
+      .slice(0, room);
+    setPendingFiles((p) => [...p, ...next].slice(0, 3));
   }
 
   function parseCoords(): { lat: number; lng: number } | null {
@@ -98,14 +120,25 @@ export function PlaceEditorCard({
 
   async function postUpdate(): Promise<boolean> {
     if (!draft.name.trim()) {
-      window.alert("Il nome è obbligatorio.");
+      window.alert(t("moderation.editor.alertName"));
       return false;
     }
     const coords = parseCoords();
     if (!coords) {
-      window.alert("Latitudine e longitudine non valide.");
+      window.alert(t("moderation.editor.alertCoords"));
       return false;
     }
+
+    let uploaded: string[] = [];
+    if (pendingFiles.length > 0) {
+      try {
+        uploaded = await uploadImagesToCloudinary(pendingFiles);
+      } catch {
+        window.alert(t("moderation.editor.alertSave"));
+        return false;
+      }
+    }
+    const photo_urls = [...photoUrls, ...uploaded].slice(0, 3);
 
     const res = await fetch("/api/moderation", {
       method: "POST",
@@ -124,13 +157,16 @@ export function PlaceEditorCard({
         limited_hours: draft.limited_hours,
         hours_note: draft.limited_hours ? draft.hours_note.trim() || null : null,
         extra_info: draft.extra_info.trim() || null,
+        tags: parseTagsInput(draft.tags),
+        photo_urls,
       }),
     });
     const data = await res.json();
     if (!res.ok) {
-      window.alert(data.error ?? "Salvataggio non riuscito.");
+      window.alert(data.error ?? t("moderation.editor.alertSave"));
       return false;
     }
+    setPendingFiles([]);
     return true;
   }
 
@@ -156,7 +192,7 @@ export function PlaceEditorCard({
       });
       const data = await res.json();
       if (!res.ok) {
-        window.alert(data.error ?? "Approvazione non riuscita.");
+        window.alert(data.error ?? t("moderation.editor.alertApprove"));
         return;
       }
       await onRefresh();
@@ -166,7 +202,7 @@ export function PlaceEditorCard({
   }
 
   async function rejectPending() {
-    if (!window.confirm("Rifiutare e cancellare definitivamente questa proposta?")) return;
+    if (!window.confirm(t("moderation.editor.confirmReject"))) return;
     setBusyId(place.id);
     try {
       const res = await fetch("/api/moderation", {
@@ -176,7 +212,7 @@ export function PlaceEditorCard({
       });
       const data = await res.json();
       if (!res.ok) {
-        window.alert(data.error ?? "Operazione non riuscita.");
+        window.alert(data.error ?? t("moderation.editor.alertOp"));
         return;
       }
       await onRefresh();
@@ -197,7 +233,7 @@ export function PlaceEditorCard({
       });
       const data = await res.json();
       if (!res.ok) {
-        window.alert(data.error ?? "Pubblicazione non riuscita.");
+        window.alert(data.error ?? t("moderation.editor.alertPublish"));
         return;
       }
       await onRefresh();
@@ -207,7 +243,7 @@ export function PlaceEditorCard({
   }
 
   async function unpublish() {
-    if (!window.confirm("Mettere in bozza? Il POI sparirà dalla mappa pubblica.")) return;
+    if (!window.confirm(t("moderation.editor.confirmUnpublish"))) return;
     setBusyId(place.id);
     try {
       const ok = await postUpdate();
@@ -219,7 +255,7 @@ export function PlaceEditorCard({
       });
       const data = await res.json();
       if (!res.ok) {
-        window.alert(data.error ?? "Operazione non riuscita.");
+        window.alert(data.error ?? t("moderation.editor.alertOp"));
         return;
       }
       await onRefresh();
@@ -239,7 +275,7 @@ export function PlaceEditorCard({
       });
       const data = await res.json();
       if (!res.ok) {
-        window.alert(data.error ?? "Eliminazione non riuscita.");
+        window.alert(data.error ?? t("moderation.editor.alertDelete"));
         return;
       }
       await onRefresh();
@@ -259,10 +295,10 @@ export function PlaceEditorCard({
 
   const variantTitle =
     variant === "pending"
-      ? "Proposta utente"
+      ? t("moderation.editor.proposal")
       : variant === "draft"
-        ? "Bozza"
-        : "Pubblicato";
+        ? t("moderation.editor.draft")
+        : t("moderation.editor.published");
 
   const Shell = asListItem ? "li" : "div";
 
@@ -271,17 +307,18 @@ export function PlaceEditorCard({
       <p className="text-xs text-stone-500 dark:text-stone-400">
         <span className="font-medium text-stone-600 dark:text-stone-300">{variantTitle}</span>
         {" · "}
-        ID: <span className="font-mono text-stone-700 dark:text-stone-300">{place.id}</span>
+        {t("moderation.editor.id")}{" "}
+        <span className="font-mono text-stone-700 dark:text-stone-300">{place.id}</span>
         {" · "}
-        {formatDateIt(place.created_at)}
+        {formatDate(place.created_at, locale)}
         {" · "}
-        Stato: {place.status}
+        {t("moderation.editor.state")} {place.status}
       </p>
 
       <div className="mt-4 space-y-3">
         <div>
           <label className="block text-xs font-medium text-stone-600 dark:text-stone-400">
-            Nome *
+            {t("moderation.editor.name")}
           </label>
           <input
             className="mt-1 w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 dark:border-stone-600 dark:bg-stone-950 dark:text-stone-100"
@@ -292,7 +329,7 @@ export function PlaceEditorCard({
         </div>
         <div>
           <label className="block text-xs font-medium text-stone-600 dark:text-stone-400">
-            Indirizzo
+            {t("moderation.editor.address")}
           </label>
           <input
             className="mt-1 w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 dark:border-stone-600 dark:bg-stone-950 dark:text-stone-100"
@@ -303,7 +340,7 @@ export function PlaceEditorCard({
         </div>
         <div>
           <label className="block text-xs font-medium text-stone-600 dark:text-stone-400">
-            Descrizione
+            {t("moderation.editor.description")}
           </label>
           <textarea
             rows={4}
@@ -332,12 +369,12 @@ export function PlaceEditorCard({
           />
           <div className="min-w-0 flex-1">
             <label htmlFor={`lh-${place.id}`} className="text-xs font-medium text-stone-700 dark:text-stone-300">
-              Orario limitato
+              {t("moderation.limitedHours")}
             </label>
             {draft.limited_hours && (
               <textarea
                 rows={3}
-                placeholder="Orari (testo libero)"
+                placeholder={t("moderation.hoursPlaceholder")}
                 className="mt-2 w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 dark:border-stone-600 dark:bg-stone-950 dark:text-stone-100"
                 value={draft.hours_note}
                 onChange={(e) => setField("hours_note", e.target.value)}
@@ -349,25 +386,49 @@ export function PlaceEditorCard({
 
         <div>
           <label className="block text-xs font-medium text-stone-600 dark:text-stone-400">
-            Altre informazioni sul luogo
+            {t("moderation.extraInfo")}
           </label>
-          <p className="mt-0.5 text-[11px] text-stone-500 dark:text-stone-400">
-            Ad esempio costo biglietto, come raggiungerlo una volta in loco…
-          </p>
+          <p className="mt-0.5 text-[11px] text-stone-500 dark:text-stone-400">{t("moderation.extraInfoHint")}</p>
           <textarea
             rows={3}
             className="mt-1 w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 dark:border-stone-600 dark:bg-stone-950 dark:text-stone-100"
             value={draft.extra_info}
             onChange={(e) => setField("extra_info", e.target.value)}
             disabled={busy}
-            placeholder="Ad esempio costo biglietto, come raggiungerlo una volta in loco…"
+            placeholder={t("moderation.extraInfoHint")}
           />
         </div>
+
+        <div>
+          <label className="block text-xs font-medium text-stone-600 dark:text-stone-400">{t("tags.fieldLabel")}</label>
+          <p className="mt-0.5 text-[11px] text-stone-500 dark:text-stone-400">{t("tags.fieldHelp")}</p>
+          <input
+            type="text"
+            className="mt-1 w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 dark:border-stone-600 dark:bg-stone-950 dark:text-stone-100"
+            value={draft.tags}
+            onChange={(e) => setField("tags", e.target.value)}
+            disabled={busy}
+            autoComplete="off"
+          />
+        </div>
+
+        <PlacePhotoPicker
+          existingUrls={photoUrls}
+          onRemoveExisting={(i) => setPhotoUrls((u) => u.filter((_, j) => j !== i))}
+          pendingFiles={pendingFiles}
+          onAddPending={addPendingPhotos}
+          onRemovePending={(i) => setPendingFiles((p) => p.filter((_, j) => j !== i))}
+          disabled={busy}
+          label={t("photos.label")}
+          hint={t("photos.hint")}
+          pickLabel={t("photos.pick")}
+          maxReached={t("photos.max")}
+        />
 
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-medium text-stone-600 dark:text-stone-400">
-              Latitudine *
+              {t("moderation.editor.lat")}
             </label>
             <input
               inputMode="decimal"
@@ -379,7 +440,7 @@ export function PlaceEditorCard({
           </div>
           <div>
             <label className="block text-xs font-medium text-stone-600 dark:text-stone-400">
-              Longitudine *
+              {t("moderation.editor.lng")}
             </label>
             <input
               inputMode="decimal"
@@ -392,12 +453,12 @@ export function PlaceEditorCard({
         </div>
         {coords && (
           <p className="text-xs text-stone-600 dark:text-stone-400">
-            <OsmLink lat={coords.lat} lng={coords.lng} />
+            <OsmLink lat={coords.lat} lng={coords.lng} label={t("moderation.editor.osm")} />
           </p>
         )}
         <div>
           <label className="block text-xs font-medium text-stone-600 dark:text-stone-400">
-            Categoria
+            {t("moderation.editor.category")}
           </label>
           <select
             className="mt-1 w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 dark:border-stone-600 dark:bg-stone-950 dark:text-stone-100"
@@ -407,14 +468,14 @@ export function PlaceEditorCard({
           >
             {categoryOptions.map((c) => (
               <option key={c} value={c}>
-                {c}
+                {categoryDisplayName(c, locale)}
               </option>
             ))}
           </select>
         </div>
         <div>
           <label className="block text-xs font-medium text-stone-600 dark:text-stone-400">
-            Proposto da
+            {t("moderation.editor.proposedBy")}
           </label>
           <input
             className="mt-1 w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 dark:border-stone-600 dark:bg-stone-950 dark:text-stone-100"
@@ -432,7 +493,7 @@ export function PlaceEditorCard({
           onClick={() => void saveOnly()}
           className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-sm font-medium text-stone-800 hover:bg-stone-50 disabled:opacity-60 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-100 dark:hover:bg-stone-700"
         >
-          Salva modifiche
+          {t("moderation.editor.save")}
         </button>
 
         {variant === "pending" && (
@@ -443,7 +504,7 @@ export function PlaceEditorCard({
               onClick={() => void approvePending()}
               className="rounded-md bg-teal-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-900 disabled:opacity-60"
             >
-              Approva
+              {t("moderation.editor.approve")}
             </button>
             <button
               type="button"
@@ -451,7 +512,7 @@ export function PlaceEditorCard({
               onClick={() => void rejectPending()}
               className="rounded-md bg-red-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-900 disabled:opacity-60"
             >
-              Rifiuta
+              {t("moderation.editor.reject")}
             </button>
           </>
         )}
@@ -464,17 +525,15 @@ export function PlaceEditorCard({
               onClick={() => void publishDraft()}
               className="rounded-md bg-teal-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-900 disabled:opacity-60"
             >
-              Pubblica
+              {t("moderation.editor.publish")}
             </button>
             <button
               type="button"
               disabled={busy}
-              onClick={() =>
-                void deletePlace("Eliminare definitivamente questa bozza?")
-              }
+              onClick={() => void deletePlace(t("moderation.editor.confirmDeleteDraft"))}
               className="rounded-md bg-red-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-900 disabled:opacity-60"
             >
-              Elimina
+              {t("moderation.editor.delete")}
             </button>
           </>
         )}
@@ -487,19 +546,15 @@ export function PlaceEditorCard({
               onClick={() => void unpublish()}
               className="rounded-md border border-amber-600 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-60 dark:border-amber-500 dark:bg-amber-950/50 dark:text-amber-200 dark:hover:bg-amber-900/50"
             >
-              Metti in bozza
+              {t("moderation.editor.unpublish")}
             </button>
             <button
               type="button"
               disabled={busy}
-              onClick={() =>
-                void deletePlace(
-                  "Eliminare definitivamente questo POI dalla mappa? L’azione non è reversibile."
-                )
-              }
+              onClick={() => void deletePlace(t("moderation.editor.confirmDeletePublished"))}
               className="rounded-md bg-red-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-900 disabled:opacity-60"
             >
-              Elimina dalla mappa
+              {t("moderation.editor.deleteFromMap")}
             </button>
           </>
         )}

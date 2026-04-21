@@ -15,6 +15,8 @@ create table if not exists public.places (
   limited_hours boolean not null default false,
   hours_note text,
   extra_info text,
+  tags text[] not null default '{}',
+  photo_urls text[] not null default '{}',
   created_at timestamptz not null default now(),
   constraint places_status_check check (status in ('pending', 'approved', 'draft'))
 );

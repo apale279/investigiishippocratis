@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useI18n } from "@/lib/i18n/context";
 
 export type GeocodeSuggestion = {
   lat: number;
@@ -20,6 +21,7 @@ type Props = {
 };
 
 export function AddressAutocomplete({ id, label, value, onChange, onPick, hint }: Props) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState<GeocodeSuggestion[]>([]);
@@ -78,10 +80,10 @@ export function AddressAutocomplete({ id, label, value, onChange, onPick, hint }
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}
-        placeholder="Inizia a digitare: via, città, paese…"
+        placeholder={t("addressAuto.placeholder")}
       />
       {loading && (
-        <p className="mt-1 text-xs text-stone-500">Ricerca indirizzi…</p>
+        <p className="mt-1 text-xs text-stone-500">{t("addressAuto.loading")}</p>
       )}
       {hint && !loading && (
         <p className="mt-1 text-xs text-amber-800 dark:text-amber-400">{hint}</p>
