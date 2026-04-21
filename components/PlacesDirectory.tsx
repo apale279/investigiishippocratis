@@ -9,27 +9,12 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { categoryDisplayName } from "@/lib/i18n/dictionaries";
 import { useI18n } from "@/lib/i18n/context";
 import { normalizeTagParam, placeHasTag } from "@/lib/hashtags";
+import { matchesPlaceTextSearch } from "@/lib/placeTextSearch";
 import { PlaceShareButtons } from "@/components/PlaceShareButtons";
 import { PlaceTagLinks } from "@/components/PlaceTagLinks";
 
 const PLACE_FIELDS =
   "id, name, address, description, lat, lng, category, submitted_by, limited_hours, hours_note, extra_info, tags, photo_urls";
-
-function matchesSearch(p: Place, q: string): boolean {
-  const needle = q.trim().toLowerCase();
-  if (!needle) return true;
-  const hay = [
-    p.name,
-    p.address ?? "",
-    p.description ?? "",
-    p.extra_info ?? "",
-    p.hours_note ?? "",
-    p.category,
-  ]
-    .join(" ")
-    .toLowerCase();
-  return hay.includes(needle);
-}
 
 function PlacesDirectoryInner() {
   const { t, locale } = useI18n();
@@ -72,7 +57,7 @@ function PlacesDirectoryInner() {
   const filtered = useMemo(() => {
     return places.filter((p) => {
       if (categoryFilter !== "__all__" && p.category !== categoryFilter) return false;
-      if (!matchesSearch(p, query)) return false;
+      if (!matchesPlaceTextSearch(p, query)) return false;
       if (!placeHasTag(p, tagFilter)) return false;
       return true;
     });

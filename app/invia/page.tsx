@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import dynamic from "next/dynamic";
+import { useCallback, useState } from "react";
 import Link from "next/link";
 import { AppHeader } from "@/components/AppHeader";
 import { AddressAutocomplete, type GeocodeSuggestion } from "@/components/AddressAutocomplete";
@@ -12,12 +13,19 @@ import { PlacePhotoPicker } from "@/components/PlacePhotoPicker";
 import { uploadImagesToCloudinary } from "@/lib/cloudinaryUpload";
 import { parseTagsInput } from "@/lib/tags";
 
+const ProposalMapPicker = dynamic(
+  () => import("@/components/ProposalMapPicker").then((m) => m.ProposalMapPicker),
+  { ssr: false, loading: () => <div className="h-48 animate-pulse rounded-md bg-stone-200 dark:bg-stone-800" /> }
+);
+
 export default function InviaPage() {
   const { t, locale } = useI18n();
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
   const [lat, setLat] = useState("");
   const [lng, setLng] = useState("");
+  /** Se true, digitare nell’indirizzo non azzera le coordinate (mappa / coordinate manuali). */
+  const [coordLock, setCoordLock] = useState(false);
   const [description, setDescription] = useState("");
   const [limitedHours, setLimitedHours] = useState(false);
   const [hoursNote, setHoursNote] = useState("");
@@ -30,18 +38,68 @@ export default function InviaPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [addressHint, setAddressHint] = useState<string | null>(null);
 
+  const [reverseBusy, setReverseBusy] = useState(false);
+
+  const latNum = parseFloat(lat.replace(",", "."));
+  const lngNum = parseFloat(lng.replace(",", "."));
+  const coordsValid =
+    Number.isFinite(latNum) &&
+    Number.isFinite(lngNum) &&
+    latNum >= -90 &&
+    latNum <= 90 &&
+    lngNum >= -180 &&
+    lngNum <= 180;
+
   function onPickAddress(s: GeocodeSuggestion) {
     setAddressHint(null);
+    setCoordLock(false);
     setLat(String(s.lat));
     setLng(String(s.lng));
   }
 
   function onAddressChange(value: string, source: "input" | "pick") {
     setAddress(value);
-    if (source === "input") {
+    if (source === "pick") {
+      setCoordLock(false);
+      return;
+    }
+    if (!coordLock) {
       setLat("");
       setLng("");
     }
+  }
+
+  function applyCoords(latitude: number, longitude: number, opts?: { reverseIfNoAddress?: boolean }) {
+    setLat(String(latitude));
+    setLng(String(longitude));
+    setCoordLock(true);
+    if (opts?.reverseIfNoAddress && !address.trim()) {
+      void reverseLookupAddress(latitude, longitude);
+    }
+  }
+
+  const reverseLookupAddress = useCallback(async (latitude: number, longitude: number) => {
+    setReverseBusy(true);
+    setAddressHint(null);
+    try {
+      const res = await fetch(
+        `/api/geocode?reverse=1&lat=${encodeURIComponent(String(latitude))}&lng=${encodeURIComponent(String(longitude))}`
+      );
+      const data = (await res.json()) as { results?: { label: string }[] };
+      const label = data.results?.[0]?.label;
+      if (label) {
+        setAddress(label);
+        setCoordLock(true);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setReverseBusy(false);
+    }
+  }, []);
+
+  function onMapPosition(latitude: number, longitude: number) {
+    applyCoords(latitude, longitude, { reverseIfNoAddress: true });
   }
 
   function addPendingPhotos(fileList: FileList | null) {
@@ -62,10 +120,6 @@ export default function InviaPage() {
     const lngN = parseFloat(lng.replace(",", "."));
     if (!name.trim()) {
       setMessage(t("invia.errName"));
-      return;
-    }
-    if (!address.trim()) {
-      setMessage(t("invia.errAddress"));
       return;
     }
     if (Number.isNaN(latN) || Number.isNaN(lngN)) {
@@ -108,6 +162,7 @@ export default function InviaPage() {
       setAddress("");
       setLat("");
       setLng("");
+      setCoordLock(false);
       setDescription("");
       setLimitedHours(false);
       setHoursNote("");
@@ -161,16 +216,62 @@ export default function InviaPage() {
           />
           <p className="text-xs text-stone-500 dark:text-stone-400">{t("invia.addressHelp")}</p>
 
-          <div className="rounded-md border border-stone-200 bg-stone-50 px-3 py-2 dark:border-stone-700 dark:bg-stone-900/80">
-            <p className="text-xs font-medium text-stone-600 dark:text-stone-400">{t("invia.coordsAuto")}</p>
-            <div className="mt-1 grid grid-cols-2 gap-2 text-sm text-stone-800 dark:text-stone-200">
+          <div>
+            <h2 className="text-sm font-semibold text-stone-800 dark:text-stone-100">{t("invia.mapSectionTitle")}</h2>
+            <div className="mt-2">
+              <ProposalMapPicker
+                lat={coordsValid ? latNum : null}
+                lng={coordsValid ? lngNum : null}
+                onPositionChange={onMapPosition}
+                hint={t("invia.mapHint")}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-md border border-stone-200 bg-stone-50 px-3 py-3 dark:border-stone-700 dark:bg-stone-900/80">
+            <p className="text-xs font-medium text-stone-600 dark:text-stone-400">{t("invia.coordsManual")}</p>
+            <div className="mt-2 grid grid-cols-2 gap-2">
               <div>
-                {t("invia.lat")} <span className="font-mono">{lat || t("popup.dash")}</span>
+                <label htmlFor="lat-input" className="block text-xs text-stone-500 dark:text-stone-400">
+                  {t("invia.lat")}
+                </label>
+                <input
+                  id="lat-input"
+                  inputMode="decimal"
+                  className="mt-0.5 w-full rounded-md border border-stone-300 bg-white px-2 py-1.5 font-mono text-sm text-stone-900 dark:border-stone-600 dark:bg-stone-950 dark:text-stone-100"
+                  value={lat}
+                  onChange={(e) => {
+                    setLat(e.target.value);
+                    setCoordLock(true);
+                  }}
+                  placeholder="43.77"
+                />
               </div>
               <div>
-                {t("invia.lng")} <span className="font-mono">{lng || t("popup.dash")}</span>
+                <label htmlFor="lng-input" className="block text-xs text-stone-500 dark:text-stone-400">
+                  {t("invia.lng")}
+                </label>
+                <input
+                  id="lng-input"
+                  inputMode="decimal"
+                  className="mt-0.5 w-full rounded-md border border-stone-300 bg-white px-2 py-1.5 font-mono text-sm text-stone-900 dark:border-stone-600 dark:bg-stone-950 dark:text-stone-100"
+                  value={lng}
+                  onChange={(e) => {
+                    setLng(e.target.value);
+                    setCoordLock(true);
+                  }}
+                  placeholder="11.25"
+                />
               </div>
             </div>
+            <button
+              type="button"
+              disabled={!coordsValid || reverseBusy}
+              onClick={() => coordsValid && void reverseLookupAddress(latNum, lngNum)}
+              className="mt-3 w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800 hover:bg-stone-50 disabled:opacity-50 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-100 dark:hover:bg-stone-700"
+            >
+              {reverseBusy ? t("invia.coordsReverseLoading") : t("invia.coordsReverse")}
+            </button>
           </div>
 
           <div>

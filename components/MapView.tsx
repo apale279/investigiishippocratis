@@ -12,6 +12,7 @@ import { DEFAULT_SEARCH_RADIUS_KM, haversineKm } from "@/lib/geo";
 import { categoryDisplayName } from "@/lib/i18n/dictionaries";
 import { useI18n } from "@/lib/i18n/context";
 import { normalizeTagParam, placeHasTag } from "@/lib/hashtags";
+import { matchesPlaceTextSearch } from "@/lib/placeTextSearch";
 import { getMarkerIconForCategory, getSearchCenterIcon } from "@/lib/mapCategoryIcons";
 import "leaflet/dist/leaflet.css";
 
@@ -80,6 +81,8 @@ function MapViewInner() {
   const [loading, setLoading] = useState(true);
 
   const [searchQuery, setSearchQuery] = useState("");
+  /** Filtro testo/hashtag sui POI salvati (senza geocoding). */
+  const [placeKeywordFilter, setPlaceKeywordFilter] = useState<string | null>(null);
   const [searchCenter, setSearchCenter] = useState<{
     lat: number;
     lng: number;
@@ -133,6 +136,22 @@ function MapViewInner() {
     return allPlaces.filter((p) => placeHasTag(p, tagFilter));
   }, [allPlaces, tagFilter]);
 
+  const keywordFilteredList = useMemo(() => {
+    if (!placeKeywordFilter?.trim()) return null;
+    return tagFilteredPlaces.filter((p) => matchesPlaceTextSearch(p, placeKeywordFilter));
+  }, [tagFilteredPlaces, placeKeywordFilter]);
+
+  const fitBasePlaces = useMemo(() => {
+    if (keywordFilteredList !== null) return keywordFilteredList;
+    return tagFilteredPlaces;
+  }, [keywordFilteredList, tagFilteredPlaces]);
+
+  const keywordSortedPlaces = useMemo(() => {
+    if (keywordFilteredList === null) return null;
+    const collator = locale === "en" ? "en" : "it";
+    return [...keywordFilteredList].sort((a, b) => a.name.localeCompare(b.name, collator));
+  }, [keywordFilteredList, locale]);
+
   const nearbySorted = useMemo(() => {
     if (!searchCenter) return [];
     const r = clampRadiusKm(radiusKm);
@@ -146,7 +165,14 @@ function MapViewInner() {
   }, [tagFilteredPlaces, searchCenter, radiusKm]);
 
   const displayPlaces = useMemo(() => {
-    let list = searchCenter ? nearbySorted.map((x) => x.place) : tagFilteredPlaces;
+    let list: Place[];
+    if (keywordSortedPlaces !== null) {
+      list = keywordSortedPlaces;
+    } else if (searchCenter) {
+      list = nearbySorted.map((x) => x.place);
+    } else {
+      list = tagFilteredPlaces;
+    }
     if (focusId) {
       const fp = allPlaces.find((p) => p.id === focusId);
       if (fp && !list.some((p) => p.id === fp.id)) {
@@ -154,7 +180,7 @@ function MapViewInner() {
       }
     }
     return list;
-  }, [searchCenter, nearbySorted, tagFilteredPlaces, allPlaces, focusId]);
+  }, [keywordSortedPlaces, searchCenter, nearbySorted, tagFilteredPlaces, allPlaces, focusId]);
 
   const center: [number, number] = [42.5, 12.5];
   const zoom = allPlaces.length === 0 ? 5 : 6;
@@ -173,6 +199,14 @@ function MapViewInner() {
       setSearchError("map.searchMinChars");
       return;
     }
+    const localMatches = tagFilteredPlaces.filter((p) => matchesPlaceTextSearch(p, q));
+    if (localMatches.length > 0) {
+      setPlaceKeywordFilter(q);
+      setSearchCenter(null);
+      setFlyTarget(null);
+      return;
+    }
+    setPlaceKeywordFilter(null);
     setSearching(true);
     try {
       const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}&limit=1`);
@@ -201,6 +235,7 @@ function MapViewInner() {
 
   function clearSearch() {
     setSearchCenter(null);
+    setPlaceKeywordFilter(null);
     setSearchError(null);
     setFlyTarget(null);
   }
@@ -257,7 +292,7 @@ function MapViewInner() {
               >
                 {searching ? "…" : t("map.search")}
               </button>
-              {searchCenter && (
+              {(searchCenter || placeKeywordFilter) && (
                 <button
                   type="button"
                   onClick={clearSearch}
@@ -318,7 +353,42 @@ function MapViewInner() {
             <p className="mt-1.5 text-[11px] text-stone-500 dark:text-stone-400">{t("map.radiusHint")}</p>
           </div>
 
-          {searchCenter && (
+          {keywordFilteredList !== null && keywordFilteredList.length > 0 && (
+            <>
+              <p className="text-xs text-stone-600 dark:text-stone-400">
+                {t("map.keywordSummary", {
+                  count: keywordFilteredList.length,
+                  query: placeKeywordFilter ?? "",
+                })}
+              </p>
+              <div className="min-h-0 flex flex-col gap-1">
+                <p className="text-xs font-medium text-stone-700 dark:text-stone-300">{t("map.keywordListTitle")}</p>
+                <ul
+                  className="max-h-52 overflow-y-auto rounded-md border border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-950/80"
+                  role="list"
+                >
+                  {keywordSortedPlaces?.map((p) => (
+                      <li key={p.id} className="border-b border-stone-100 last:border-b-0 dark:border-stone-800">
+                        <button
+                          type="button"
+                          onClick={() => onPickPlaceFromList(p)}
+                          className="flex w-full items-start gap-2 px-3 py-2.5 text-left text-sm transition-colors hover:bg-teal-50 dark:hover:bg-stone-800"
+                        >
+                          <span className="min-w-0 flex-1">
+                            <span className="font-medium text-stone-900 dark:text-stone-100">{p.name}</span>
+                            <span className="mt-0.5 block text-xs text-stone-500 dark:text-stone-400">
+                              {categoryDisplayName(p.category, locale)}
+                            </span>
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            </>
+          )}
+
+          {searchCenter && !placeKeywordFilter && (
             <>
               <p className="text-xs text-stone-600 dark:text-stone-400">
                 {t("map.pointFrom")}{" "}
@@ -398,7 +468,7 @@ function MapViewInner() {
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         <MapFitController
-          placesForInitialFit={tagFilteredPlaces}
+          placesForInitialFit={fitBasePlaces}
           displayPlaces={displayPlaces}
           searchCenter={searchCenter ? { lat: searchCenter.lat, lng: searchCenter.lng } : null}
         />
